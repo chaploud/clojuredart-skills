@@ -7,7 +7,7 @@ set -euo pipefail
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   echo "Usage: cljd-key KEY"
   echo ""
-  echo "Keys: home, lock, volumeUp, volumeDown"
+  echo "Keys: home, lock, side-button, siri, apple-pay"
   echo ""
   echo "Requires: axe (brew tap cameroncooke/axe && brew install axe)"
   exit 0
@@ -15,7 +15,7 @@ fi
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: cljd-key KEY" >&2
-  echo "Keys: home, lock, volumeUp, volumeDown" >&2
+  echo "Keys: home, lock, side-button, siri, apple-pay" >&2
   exit 1
 fi
 
@@ -42,21 +42,12 @@ sys.exit(1)
 KEY="$1"
 
 case "$KEY" in
-  home)
-    axe button --udid "$UDID" --name home 2>/dev/null
-    ;;
-  lock)
-    axe button --udid "$UDID" --name lock 2>/dev/null
-    ;;
-  volumeUp|volumeup)
-    axe button --udid "$UDID" --name volumeUp 2>/dev/null
-    ;;
-  volumeDown|volumedown)
-    axe button --udid "$UDID" --name volumeDown 2>/dev/null
+  home|lock|side-button|siri|apple-pay)
+    axe button "$KEY" --udid "$UDID" 2>/dev/null
     ;;
   *)
     echo "ERROR: Unknown key: $KEY" >&2
-    echo "Available: home, lock, volumeUp, volumeDown" >&2
+    echo "Available: home, lock, side-button, siri, apple-pay" >&2
     exit 1
     ;;
 esac

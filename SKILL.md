@@ -150,7 +150,11 @@ Use the x,y coordinates with `cljd-tap` to interact with elements.
 
 ```bash
 cljd-tap 200 400                   # Tap at (200, 400)
+cljd-tap --label "Login"           # Tap by accessibility label
+cljd-tap --id "login_button"       # Tap by accessibility identifier
 ```
+
+Prefer `--label` when the element has a clear label — more reliable than coordinates.
 
 ### Swipe (`cljd-swipe`) — requires AXe
 

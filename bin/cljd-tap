@@ -3,16 +3,18 @@ set -euo pipefail
 
 # cljd-tap - Tap at coordinates on iOS Simulator via AXe
 # Usage: cljd-tap X Y
+#        cljd-tap --label "Button text"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   echo "Usage: cljd-tap X Y"
+  echo "       cljd-tap --label \"Button text\""
   echo ""
-  echo "Tap at the specified coordinates on the booted iOS Simulator."
+  echo "Tap at coordinates or by accessibility label."
   echo "Requires: axe (brew tap cameroncooke/axe && brew install axe)"
   exit 0
 fi
 
-if [[ $# -lt 2 ]]; then
+if [[ $# -lt 1 ]]; then
   echo "Usage: cljd-tap X Y" >&2
   exit 1
 fi
@@ -37,5 +39,13 @@ sys.exit(1)
   exit 1
 }
 
-axe tap --udid "$UDID" --x "$1" --y "$2" 2>/dev/null
-echo "Tapped at ($1, $2)"
+if [[ "$1" == "--label" ]]; then
+  axe tap --label "$2" --udid "$UDID" 2>/dev/null
+  echo "Tapped label: $2"
+elif [[ "$1" == "--id" ]]; then
+  axe tap --id "$2" --udid "$UDID" 2>/dev/null
+  echo "Tapped id: $2"
+else
+  axe tap -x "$1" -y "$2" --udid "$UDID" 2>/dev/null
+  echo "Tapped at ($1, $2)"
+fi

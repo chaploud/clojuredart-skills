@@ -54,110 +54,105 @@ sys.exit(1)
   exit 1
 }
 
+# AXe field mapping:
+#   type     -> element type (Button, Image, StaticText, TextField, etc.)
+#   AXLabel  -> accessibility label
+#   AXValue  -> current value
+#   frame    -> {x, y, width, height}
+#   role     -> AX role (AXButton, AXImage, AXStaticText, etc.)
+
+SKIP_TYPES='AXApplication|AXWindow|AXGroup|AXOther|AXScrollArea|AXList|AXCell|AXLayoutArea|AXWebArea|AXTable|AXRow|AXColumn'
+
 case "$MODE" in
   full)
-    axe dump --udid "$UDID" 2>/dev/null
+    axe describe-ui --udid "$UDID" 2>/dev/null
     ;;
   compact)
-    axe dump --udid "$UDID" 2>/dev/null | python3 -c "
+    axe describe-ui --udid "$UDID" 2>/dev/null | python3 -c "
 import json, sys
 
-def parse_compact(data):
-    results = []
-    def walk(node, depth=0):
-        role = node.get('role', '')
-        label = node.get('label', '')
-        value = node.get('value', '')
-        frame = node.get('frame', {})
-        x = frame.get('x', 0)
-        y = frame.get('y', 0)
-        w = frame.get('width', 0)
-        h = frame.get('height', 0)
+SKIP = {'AXApplication', 'AXWindow', 'AXGroup', 'AXOther', 'AXScrollArea',
+        'AXList', 'AXCell', 'AXLayoutArea', 'AXWebArea', 'AXTable', 'AXRow', 'AXColumn'}
 
-        parts = [f'[{role}]']
+def walk(node):
+    results = []
+    role = node.get('role', '') or ''
+    typ = node.get('type', '') or ''
+    label = node.get('AXLabel') or ''
+    value = node.get('AXValue') or ''
+    frame = node.get('frame', {})
+    x = frame.get('x', 0)
+    y = frame.get('y', 0)
+    w = frame.get('width', 0)
+    h = frame.get('height', 0)
+
+    if role not in SKIP and typ:
+        parts = [f'[{typ}]']
         if label:
             parts.append(f'\"{label}\"')
         parts.append(f'(x:{int(x)} y:{int(y)} w:{int(w)} h:{int(h)})')
         if value:
             parts.append(f'value=\"{value}\"')
+        results.append(' '.join(parts))
 
-        if role and role not in ('None', 'Other', 'Group', 'Window', 'Application'):
-            results.append(' '.join(parts))
-
-        for child in node.get('children', []):
-            walk(child, depth + 1)
-
-    if isinstance(data, list):
-        for item in data:
-            walk(item)
-    else:
-        walk(data)
+    for child in node.get('children', []):
+        results.extend(walk(child))
     return results
 
 try:
     data = json.load(sys.stdin)
-    for line in parse_compact(data):
-        print(line)
-except json.JSONDecodeError:
-    # If not JSON, pass through raw output
-    sys.stdin.seek(0)
-    print(sys.stdin.read())
+    nodes = data if isinstance(data, list) else [data]
+    for node in nodes:
+        for line in walk(node):
+            print(line)
 except Exception as e:
-    print(f'Error parsing tree: {e}', file=sys.stderr)
+    print(f'Error: {e}', file=sys.stderr)
     sys.exit(1)
 "
     ;;
   interactive)
-    axe dump --udid "$UDID" 2>/dev/null | python3 -c "
+    axe describe-ui --udid "$UDID" 2>/dev/null | python3 -c "
 import json, sys
 
-INTERACTIVE_ROLES = {
-    'Button', 'TextField', 'SecureTextField', 'TextArea',
-    'Switch', 'Slider', 'Picker', 'Link', 'Tab',
-    'Checkbox', 'RadioButton', 'Toggle', 'Stepper',
-    'SegmentedControl', 'PopUpButton', 'MenuItem',
-}
+INTERACTIVE = {'AXButton', 'AXTextField', 'AXSecureTextField', 'AXTextArea',
+               'AXSwitch', 'AXSlider', 'AXPicker', 'AXLink', 'AXTab',
+               'AXCheckBox', 'AXRadioButton', 'AXToggle', 'AXStepper',
+               'AXSegmentedControl', 'AXPopUpButton', 'AXMenuItem',
+               'AXComboBox', 'AXIncrementor'}
 
-def parse_interactive(data):
+def walk(node):
     results = []
-    def walk(node):
-        role = node.get('role', '')
-        label = node.get('label', '')
-        value = node.get('value', '')
-        frame = node.get('frame', {})
-        x = frame.get('x', 0)
-        y = frame.get('y', 0)
-        w = frame.get('width', 0)
-        h = frame.get('height', 0)
+    role = node.get('role', '') or ''
+    typ = node.get('type', '') or ''
+    label = node.get('AXLabel') or ''
+    value = node.get('AXValue') or ''
+    frame = node.get('frame', {})
+    x = frame.get('x', 0)
+    y = frame.get('y', 0)
+    w = frame.get('width', 0)
+    h = frame.get('height', 0)
 
-        if role in INTERACTIVE_ROLES:
-            parts = [f'[{role}]']
-            if label:
-                parts.append(f'\"{label}\"')
-            parts.append(f'(x:{int(x)} y:{int(y)} w:{int(w)} h:{int(h)})')
-            if value:
-                parts.append(f'value=\"{value}\"')
-            results.append(' '.join(parts))
+    if role in INTERACTIVE:
+        parts = [f'[{typ}]']
+        if label:
+            parts.append(f'\"{label}\"')
+        parts.append(f'(x:{int(x)} y:{int(y)} w:{int(w)} h:{int(h)})')
+        if value:
+            parts.append(f'value=\"{value}\"')
+        results.append(' '.join(parts))
 
-        for child in node.get('children', []):
-            walk(child)
-
-    if isinstance(data, list):
-        for item in data:
-            walk(item)
-    else:
-        walk(data)
+    for child in node.get('children', []):
+        results.extend(walk(child))
     return results
 
 try:
     data = json.load(sys.stdin)
-    for line in parse_interactive(data):
-        print(line)
-except json.JSONDecodeError:
-    sys.stdin.seek(0)
-    print(sys.stdin.read())
+    nodes = data if isinstance(data, list) else [data]
+    for node in nodes:
+        for line in walk(node):
+            print(line)
 except Exception as e:
-    print(f'Error parsing tree: {e}', file=sys.stderr)
+    print(f'Error: {e}', file=sys.stderr)
     sys.exit(1)
 "
     ;;

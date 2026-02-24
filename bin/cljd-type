@@ -8,6 +8,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   echo 'Usage: cljd-type "text to type"'
   echo ""
   echo "Types text into the currently focused text field."
+  echo "Only US keyboard characters supported (A-Z, a-z, 0-9, common symbols)."
   echo "Requires: axe (brew tap cameroncooke/axe && brew install axe)"
   exit 0
 fi
@@ -37,5 +38,5 @@ sys.exit(1)
   exit 1
 }
 
-axe type --udid "$UDID" --text "$1" 2>/dev/null
+axe type "$1" --udid "$UDID" 2>/dev/null
 echo "Typed: $1"
