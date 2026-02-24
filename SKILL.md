@@ -133,6 +133,20 @@ Detects already-completed reloads instantly (checks from last compilation marker
 Exit codes: 0 = reload detected, 1 = timeout, 2 = compilation error.
 Use after editing `.cljd` files instead of `sleep`.
 
+### Hot Restart (`cljd-hot-restart`)
+
+Triggers a Flutter hot restart programmatically via the command pipe.
+Requires `cljd-flutter` to be running in a separate terminal.
+
+```bash
+cljd-hot-restart                   # Restart and wait for completion (default 30s)
+cljd-hot-restart --timeout 60      # Custom timeout
+cljd-hot-restart --no-wait         # Fire and forget
+```
+
+Exit codes: 0 = restart completed, 1 = timeout, 2 = error.
+Use when changes require hot restart (new `require`, top-level `def`s, `setup!`, routing).
+
 ### Simulator List (`cljd-devices`)
 
 ```bash
@@ -215,11 +229,12 @@ flutter: [DEBUG] Writing `session` to SharedPreferences
   If `/tmp/cljd_build.log` doesn't exist, ask the user to start it.
 - **Wait after edits**: Hot reload takes 2-5 seconds. Don't check errors immediately.
 - **Hot restart required**: When changes affect top-level `def`s, event handler
-  registration (`setup!`), or routing, hot reload is insufficient. In these cases,
-  **stop and ask the user explicitly**:
-
-  > **🔄 ホットリスタートが必要です** — cljd-flutter のターミナルで `R` を押してください。
-
-  Do NOT proceed with verification until the user confirms the restart is done.
+  registration (`setup!`), routing, or new `require`s, hot reload is insufficient.
+  Use `cljd-hot-restart` to trigger a hot restart programmatically:
+  ```bash
+  cljd-hot-restart
+  ```
+  If the command pipe is not available (cljd-flutter started without FIFO support),
+  fall back to asking the user to press `R` in the cljd-flutter terminal.
 - **Coordinate system**: AXe uses logical points (not pixels). The coordinates from
   `cljd-ui-tree` output can be used directly with `cljd-tap`.

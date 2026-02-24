@@ -4,9 +4,11 @@ set -euo pipefail
 # cljd-flutter - Build wrapper for ClojureDart with log capture
 # Usage: cljd-flutter [--flavor FLAVOR] [flutter args...]
 # Run this in a separate terminal. Logs are captured to /tmp/cljd_build.log
+# Supports external commands via FIFO (e.g. cljd-hot-restart)
 
 LOG_FILE="/tmp/cljd_build.log"
 PID_FILE="/tmp/cljd_flutter.pid"
+COMMAND_PIPE="/tmp/cljd_flutter_cmd"
 
 show_help() {
   echo "Usage: cljd-flutter [--flavor FLAVOR] [flutter args...]"
@@ -18,6 +20,7 @@ show_help() {
   echo '  cljd-flutter --flavor dev -d "iPhone 17 Pro"'
   echo ""
   echo "The build log can be read by cljd-build-log."
+  echo "Hot restart can be triggered externally via cljd-hot-restart."
 }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -28,9 +31,16 @@ fi
 # Store PID for potential process management
 echo $$ > "$PID_FILE"
 
-# Clean up PID file on exit
+# Create command FIFO for external input (e.g. hot restart)
+rm -f "$COMMAND_PIPE"
+mkfifo "$COMMAND_PIPE"
+
+PIPE_READER_PID=""
+
+# Clean up on exit
 cleanup() {
-  rm -f "$PID_FILE"
+  [[ -n "$PIPE_READER_PID" ]] && kill "$PIPE_READER_PID" 2>/dev/null || true
+  rm -f "$PID_FILE" "$COMMAND_PIPE"
 }
 trap cleanup EXIT
 
@@ -38,5 +48,16 @@ echo "=== cljd-flutter started at $(date) ===" | tee "$LOG_FILE"
 echo "=== Args: $* ===" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
-# Run clj -M:cljd flutter with all arguments, tee to log
-exec clj -M:cljd flutter "$@" 2>&1 | tee -a "$LOG_FILE"
+# Merge terminal stdin and command pipe into Flutter's stdin.
+# Background loop reads from the FIFO; foreground cat reads from terminal.
+# Both feed into the pipeline to clj.
+{
+  # Background: continuously read from command pipe
+  while true; do
+    cat "$COMMAND_PIPE" 2>/dev/null || true
+  done &
+  PIPE_READER_PID=$!
+
+  # Foreground: read from terminal stdin
+  cat
+} | clj -M:cljd flutter "$@" 2>&1 | tee -a "$LOG_FILE"

@@ -66,6 +66,7 @@ TOOLS=(
   cljd-type
   cljd-key
   cljd-wait-reload
+  cljd-hot-restart
 )
 
 for tool in "${TOOLS[@]}"; do

@@ -62,6 +62,7 @@ export PATH="$HOME/.local/bin:$PATH"
 | `cljd-devices` | List simulators (`--booted`, `--json`) |
 | `cljd-errors` | Unified error check across build log + device log |
 | `cljd-wait-reload` | Wait for hot reload/restart completion or compilation error |
+| `cljd-hot-restart` | Trigger hot restart programmatically via command pipe |
 
 ### UI Interaction (requires AXe)
 
@@ -181,6 +182,18 @@ cljd-wait-reload --timeout 20      # Wait up to 20s
 
 Detects already-completed reloads instantly by checking from the last compilation marker. Exit codes: 0 = reload detected, 1 = timeout, 2 = compilation error.
 
+### `cljd-hot-restart`
+
+Triggers a Flutter hot restart programmatically. Requires `cljd-flutter` to be running.
+
+```bash
+cljd-hot-restart                   # Restart and wait for completion (default 30s)
+cljd-hot-restart --timeout 60      # Custom timeout
+cljd-hot-restart --no-wait         # Fire and forget
+```
+
+This works by sending `R` to `cljd-flutter` via a named pipe (FIFO). Unlike hot reload (which happens automatically on file save), hot restart is needed when changes affect top-level definitions, `require`s, routing, or event handler registration.
+
 ### `cljd-ui-tree`
 
 ```bash
@@ -245,6 +258,7 @@ echo '.cljd-log-filter' >> ~/.gitignore_global
 
 - **Screenshot**: `xcrun simctl io booted screenshot` + `sips --resampleHeight` for resize
 - **Build log**: `tee` captures `clj -M:cljd flutter` output to `/tmp/cljd_build.log`
+- **Hot restart**: FIFO (`/tmp/cljd_flutter_cmd`) merges external commands with terminal stdin into Flutter's stdin
 - **Device log**: `xcrun simctl spawn booted log show` with predicate filtering
 - **Error detection**: Scans from last compilation marker, checks build + device + l10n staleness
 - **UI interaction**: [AXe](https://github.com/cameroncooke/axe) accessibility automation tool

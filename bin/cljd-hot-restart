@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-hot-restart - Trigger Flutter hot restart via cljd-flutter's command pipe
+# Usage: cljd-hot-restart [--timeout SECONDS] [--no-wait]
+
+COMMAND_PIPE="/tmp/cljd_flutter_cmd"
+BUILD_LOG="/tmp/cljd_build.log"
+TIMEOUT=30
+WAIT=true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --timeout)
+      TIMEOUT="$2"
+      shift 2
+      ;;
+    --no-wait)
+      WAIT=false
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: cljd-hot-restart [--timeout SECONDS] [--no-wait]"
+      echo ""
+      echo "Trigger Flutter hot restart via cljd-flutter's command pipe."
+      echo "By default, waits for restart to complete (or timeout)."
+      echo ""
+      echo "Options:"
+      echo "  --timeout SECONDS  Max wait time (default: 30)"
+      echo "  --no-wait          Send restart command and return immediately"
+      echo ""
+      echo "Requires cljd-flutter to be running in a separate terminal."
+      echo ""
+      echo "Exit codes: 0 = restart completed, 1 = timeout, 2 = error"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Check that cljd-flutter is running
+if [[ ! -p "$COMMAND_PIPE" ]]; then
+  echo "ERROR: cljd-flutter is not running (command pipe not found)." >&2
+  echo "Start it with: cljd-flutter --flavor dev" >&2
+  exit 2
+fi
+
+# Record current log position before sending command
+START_LINE=0
+if [[ -f "$BUILD_LOG" ]]; then
+  START_LINE=$(wc -l < "$BUILD_LOG")
+fi
+
+# Send 'R' (hot restart) to the Flutter process
+echo "R" > "$COMMAND_PIPE"
+
+if [[ "$WAIT" == "false" ]]; then
+  echo "Hot restart command sent."
+  exit 0
+fi
+
+# Wait for restart to complete
+ELAPSED=0
+while (( ELAPSED < TIMEOUT * 2 )); do
+  sleep 0.5
+  ELAPSED=$((ELAPSED + 1))
+
+  [[ ! -f "$BUILD_LOG" ]] && continue
+  NEW_LINES=$(tail -n +"$((START_LINE + 1))" "$BUILD_LOG" 2>/dev/null || true)
+  [[ -z "$NEW_LINES" ]] && continue
+
+  if echo "$NEW_LINES" | grep -q 'Restarted application'; then
+    echo "Hot restart completed."
+    exit 0
+  fi
+
+  if echo "$NEW_LINES" | grep -qE 'CompilationError|clojure\.lang\.ExceptionInfo'; then
+    echo "ERROR: Compilation error during restart." >&2
+    echo "$NEW_LINES" | grep -E 'CompilationError|ExceptionInfo|:cause ' | head -3 >&2
+    exit 2
+  fi
+done
+
+echo "Timeout after ${TIMEOUT}s. Restart may still be in progress." >&2
+exit 1
