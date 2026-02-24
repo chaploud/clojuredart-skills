@@ -39,10 +39,35 @@ done
 FOUND_ERRORS=false
 BUILD_LOG="/tmp/cljd_build.log"
 
+_find_project_root() {
+  local dir="$PWD"
+  while [[ "$dir" != "/" ]]; do
+    [[ -f "$dir/pubspec.yaml" ]] && echo "$dir" && return 0
+    dir=$(dirname "$dir")
+  done
+  return 1
+}
+
+_apply_log_filter() {
+  local project_root
+  project_root=$(_find_project_root 2>/dev/null) || { cat; return; }
+  local filter_file="$project_root/.cljd-log-filter"
+  if [[ -f "$filter_file" ]] && [[ -s "$filter_file" ]]; then
+    grep -v -F -f "$filter_file" || true
+  else
+    cat
+  fi
+}
+
 if [[ "$CHECK_BUILD" == "true" ]]; then
   if [[ -f "$BUILD_LOG" ]]; then
-    # Check last 200 lines for errors
-    RECENT=$(tail -n 200 "$BUILD_LOG")
+    # Check from last compilation start, fallback to last 2000 lines
+    LAST_COMPILE_LINE=$(grep -n '=== Compiling to Dart' "$BUILD_LOG" | tail -1 | cut -d: -f1)
+    if [[ -n "$LAST_COMPILE_LINE" ]]; then
+      RECENT=$(tail -n +"$LAST_COMPILE_LINE" "$BUILD_LOG" | _apply_log_filter)
+    else
+      RECENT=$(tail -n 2000 "$BUILD_LOG" | _apply_log_filter)
+    fi
 
     # ClojureDart compile errors
     CLJD_ERRORS=$(echo "$RECENT" | grep -n "clojure.lang.ExceptionInfo\|CompilationError" 2>/dev/null || true)
@@ -71,6 +96,15 @@ if [[ "$CHECK_BUILD" == "true" ]]; then
       done <<< "$FLUTTER_ERRORS"
     fi
 
+    # Dart runtime errors (NoSuchMethodError, TypeError, etc.)
+    RUNTIME_ERRORS=$(echo "$RECENT" | grep -E 'flutter: (NoSuchMethodError|TypeError|RangeError|StateError|ArgumentError|FormatException|Null check operator)' 2>/dev/null || true)
+    if [[ -n "$RUNTIME_ERRORS" ]]; then
+      FOUND_ERRORS=true
+      while IFS= read -r line; do
+        echo "[RUNTIME] $line"
+      done <<< "$RUNTIME_ERRORS"
+    fi
+
     # General errors/failures
     GENERAL_ERRORS=$(echo "$RECENT" | grep -iE '^Error:|^FAILURE:|Build failed|Gradle build failed' 2>/dev/null || true)
     if [[ -n "$GENERAL_ERRORS" ]]; then
@@ -96,6 +130,36 @@ if [[ "$CHECK_DEVICE" == "true" ]]; then
         [[ -n "$line" ]] && echo "[DEVICE] $line"
       done <<< "$DEVICE_ERRORS"
     fi
+  fi
+fi
+
+# Check for stale l10n: ARB files newer than generated Dart code
+if PROJECT_ROOT=$(_find_project_root); then
+  # Find ARB source files
+  NEWEST_ARB=0
+  for arb_dir in "$PROJECT_ROOT/locales" "$PROJECT_ROOT/lib/l10n" "$PROJECT_ROOT/l10n"; do
+    if [[ -d "$arb_dir" ]]; then
+      while IFS= read -r f; do
+        ts=$(stat -f %m "$f" 2>/dev/null || echo 0)
+        (( ts > NEWEST_ARB )) && NEWEST_ARB=$ts
+      done < <(find "$arb_dir" -name "*.arb" -type f 2>/dev/null)
+    fi
+  done
+
+  # Find generated l10n Dart files
+  NEWEST_GEN=0
+  for gen_dir in "$PROJECT_ROOT/lib/gen/locales" "$PROJECT_ROOT/.dart_tool/flutter_gen/gen_l10n"; do
+    if [[ -d "$gen_dir" ]]; then
+      while IFS= read -r f; do
+        ts=$(stat -f %m "$f" 2>/dev/null || echo 0)
+        (( ts > NEWEST_GEN )) && NEWEST_GEN=$ts
+      done < <(find "$gen_dir" -name "*.dart" -type f 2>/dev/null)
+    fi
+  done
+
+  if (( NEWEST_ARB > 0 && NEWEST_GEN > 0 && NEWEST_ARB > NEWEST_GEN )); then
+    echo "[L10N] ARB files are newer than generated Dart code. New i18n keys won't work until regenerated."
+    echo "       Run: flutter gen-l10n  (or restart flutter to trigger automatic generation)"
   fi
 fi
 

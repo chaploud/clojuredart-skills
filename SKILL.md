@@ -118,7 +118,20 @@ cljd-errors --build                # Build log only
 cljd-errors --device               # Device log only
 ```
 
-Output is prefixed with source: `[BUILD]`, `[DART]`, `[FLUTTER]`, `[DEVICE]`.
+Output is prefixed with source: `[BUILD]`, `[DART]`, `[FLUTTER]`, `[RUNTIME]`, `[DEVICE]`, `[L10N]`.
+
+### Wait for Reload (`cljd-wait-reload`)
+
+Blocks until Flutter hot reload/restart completes. Monitors the build log.
+
+```bash
+cljd-wait-reload                   # Wait up to 10s (default)
+cljd-wait-reload --timeout 20      # Wait up to 20s
+```
+
+Detects already-completed reloads instantly (checks from last compilation marker).
+Exit codes: 0 = reload detected, 1 = timeout, 2 = compilation error.
+Use after editing `.cljd` files instead of `sleep`.
 
 ### Simulator List (`cljd-devices`)
 
@@ -181,6 +194,17 @@ cljd-key home                      # Home button
 cljd-key lock                      # Lock screen
 ```
 
+## Log Filtering
+
+Place a `.cljd-log-filter` file in the project root (next to `pubspec.yaml`).
+Each line is a fixed string — log lines containing it are excluded from
+`cljd-build-log` and `cljd-errors` output.
+
+```
+flutter: [DEBUG] session/refresh-jwt
+flutter: [DEBUG] Writing `session` to SharedPreferences
+```
+
 ## Important Notes
 
 - **Never use `--follow` or `-f` flags** with any log commands. They block indefinitely.
@@ -190,5 +214,12 @@ cljd-key lock                      # Lock screen
 - **Build log** requires the user to be running `cljd-flutter` in another terminal.
   If `/tmp/cljd_build.log` doesn't exist, ask the user to start it.
 - **Wait after edits**: Hot reload takes 2-5 seconds. Don't check errors immediately.
+- **Hot restart required**: When changes affect top-level `def`s, event handler
+  registration (`setup!`), or routing, hot reload is insufficient. In these cases,
+  **stop and ask the user explicitly**:
+
+  > **🔄 ホットリスタートが必要です** — cljd-flutter のターミナルで `R` を押してください。
+
+  Do NOT proceed with verification until the user confirms the restart is done.
 - **Coordinate system**: AXe uses logical points (not pixels). The coordinates from
   `cljd-ui-tree` output can be used directly with `cljd-tap`.

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-wait-reload - Wait for Flutter hot reload/restart to complete
+# Monitors the build log for reload completion messages.
+# Usage: cljd-wait-reload [--timeout SECONDS]
+
+TIMEOUT=10
+BUILD_LOG="/tmp/cljd_build.log"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --timeout)
+      TIMEOUT="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: cljd-wait-reload [--timeout SECONDS]"
+      echo ""
+      echo "Wait for Flutter hot reload or restart to complete."
+      echo "Monitors the build log for completion messages."
+      echo ""
+      echo "Options:"
+      echo "  --timeout SECONDS  Max wait time (default: 10)"
+      echo ""
+      echo "Exits 0 on reload detected, 1 on timeout, 2 on error detected."
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! -f "$BUILD_LOG" ]]; then
+  echo "ERROR: Build log not found at $BUILD_LOG" >&2
+  echo "Start a build with: cljd-flutter --flavor dev" >&2
+  exit 1
+fi
+
+# Check if reload already completed since last compilation start
+_check_lines() {
+  local lines="$1"
+  if echo "$lines" | grep -qE 'Reloaded [0-9]+ of [0-9]+ libraries'; then
+    echo "Hot reload completed."
+    return 0
+  fi
+  if echo "$lines" | grep -q 'Restarted application'; then
+    echo "Hot restart completed."
+    return 0
+  fi
+  if echo "$lines" | grep -qE 'CompilationError|clojure\.lang\.ExceptionInfo'; then
+    echo "ERROR: Compilation error detected." >&2
+    echo "$lines" | grep -E 'CompilationError|ExceptionInfo|:cause ' | head -3 >&2
+    return 2
+  fi
+  return 1
+}
+
+# Look for the most recent compilation marker and check lines after it
+LAST_COMPILE_LINE=$(grep -n '=== Compiling to Dart' "$BUILD_LOG" | tail -1 | cut -d: -f1 || true)
+if [[ -n "$LAST_COMPILE_LINE" ]]; then
+  SINCE_COMPILE=$(tail -n +"$LAST_COMPILE_LINE" "$BUILD_LOG" 2>/dev/null || true)
+  _check_lines "$SINCE_COMPILE" && exit 0
+  [[ $? -eq 2 ]] && exit 2
+fi
+
+# Not yet — poll for new lines
+START_LINE=$(wc -l < "$BUILD_LOG")
+ELAPSED=0
+
+while (( ELAPSED < TIMEOUT * 2 )); do
+  sleep 0.5
+  ELAPSED=$((ELAPSED + 1))
+
+  NEW_LINES=$(tail -n +"$((START_LINE + 1))" "$BUILD_LOG" 2>/dev/null || true)
+  [[ -z "$NEW_LINES" ]] && continue
+
+  _check_lines "$NEW_LINES" && exit 0
+  [[ $? -eq 2 ]] && exit 2
+done
+
+echo "Timeout after ${TIMEOUT}s. No reload detected." >&2
+exit 1

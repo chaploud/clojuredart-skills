@@ -43,6 +43,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+_find_project_root() {
+  local dir="$PWD"
+  while [[ "$dir" != "/" ]]; do
+    [[ -f "$dir/pubspec.yaml" ]] && echo "$dir" && return 0
+    dir=$(dirname "$dir")
+  done
+  return 1
+}
+
+_apply_log_filter() {
+  local project_root
+  project_root=$(_find_project_root 2>/dev/null) || { cat; return; }
+  local filter_file="$project_root/.cljd-log-filter"
+  if [[ -f "$filter_file" ]] && [[ -s "$filter_file" ]]; then
+    grep -v -F -f "$filter_file" || true
+  else
+    cat
+  fi
+}
+
 if [[ ! -f "$LOG_FILE" ]]; then
   echo "ERROR: Build log not found at $LOG_FILE" >&2
   echo "Start a build with: cljd-flutter --flavor dev" >&2
@@ -62,6 +82,9 @@ if [[ -n "$SINCE" ]]; then
 else
   CONTENT=$(tail -n "$LAST" "$LOG_FILE")
 fi
+
+# Apply project-level log filter
+CONTENT=$(echo "$CONTENT" | _apply_log_filter)
 
 if [[ "$ERRORS_ONLY" == "true" ]]; then
   # Filter for error patterns

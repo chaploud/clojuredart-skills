@@ -39,13 +39,72 @@ sys.exit(1)
   exit 1
 }
 
+_find_and_tap_by_label() {
+  local search="$1" udid="$2"
+  # Search accessibility tree for partial label match, return center coordinates
+  local result
+  result=$(axe describe-ui --udid "$udid" 2>/dev/null | python3 -c "
+import json, sys
+
+search = sys.argv[1]
+
+def walk(node):
+    label = node.get('AXLabel') or ''
+    frame = node.get('frame', {})
+    if search in label and frame.get('width', 0) > 0:
+        x = frame.get('x', 0) + frame.get('width', 0) / 2
+        y = frame.get('y', 0) + frame.get('height', 0) / 2
+        return (x, y, label)
+    for child in node.get('children', []):
+        r = walk(child)
+        if r:
+            return r
+    return None
+
+data = json.load(sys.stdin)
+nodes = data if isinstance(data, list) else [data]
+for node in nodes:
+    r = walk(node)
+    if r:
+        print(f'{int(r[0])} {int(r[1])}')
+        print(r[2], file=sys.stderr)
+        sys.exit(0)
+sys.exit(1)
+" "$search" 2>/tmp/_cljd_tap_label.txt) || return 1
+  local cx cy
+  cx=$(echo "$result" | cut -d' ' -f1)
+  cy=$(echo "$result" | cut -d' ' -f2)
+  axe tap -x "$cx" -y "$cy" --udid "$udid" 2>&1 || return 1
+  local matched_label
+  matched_label=$(cat /tmp/_cljd_tap_label.txt 2>/dev/null)
+  echo "Tapped label: $search (matched: \"$matched_label\" at $cx,$cy)"
+}
+
 if [[ "$1" == "--label" ]]; then
-  axe tap --label "$2" --udid "$UDID" 2>/dev/null
-  echo "Tapped label: $2"
+  # Try exact match first, fallback to partial match via UI tree
+  AXE_OUTPUT=$(axe tap --label "$2" --udid "$UDID" 2>&1) && {
+    echo "Tapped label: $2"
+  } || {
+    _find_and_tap_by_label "$2" "$UDID" || {
+      echo "ERROR: Failed to tap label \"$2\"" >&2
+      echo "  AXe output: $AXE_OUTPUT" >&2
+      echo "  Hint: Use cljd-ui-tree --compact to find available labels, or use cljd-tap X Y with coordinates" >&2
+      exit 1
+    }
+  }
 elif [[ "$1" == "--id" ]]; then
-  axe tap --id "$2" --udid "$UDID" 2>/dev/null
+  AXE_OUTPUT=$(axe tap --id "$2" --udid "$UDID" 2>&1) || {
+    echo "ERROR: Failed to tap id \"$2\"" >&2
+    echo "  AXe output: $AXE_OUTPUT" >&2
+    echo "  Hint: Use cljd-ui-tree --interactive to find available ids, or use cljd-tap X Y with coordinates" >&2
+    exit 1
+  }
   echo "Tapped id: $2"
 else
-  axe tap -x "$1" -y "$2" --udid "$UDID" 2>/dev/null
+  AXE_OUTPUT=$(axe tap -x "$1" -y "$2" --udid "$UDID" 2>&1) || {
+    echo "ERROR: Failed to tap at ($1, $2)" >&2
+    [[ -n "$AXE_OUTPUT" ]] && echo "  AXe output: $AXE_OUTPUT" >&2
+    exit 1
+  }
   echo "Tapped at ($1, $2)"
 fi

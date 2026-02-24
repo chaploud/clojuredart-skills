@@ -65,6 +65,7 @@ TOOLS=(
   cljd-swipe
   cljd-type
   cljd-key
+  cljd-wait-reload
 )
 
 for tool in "${TOOLS[@]}"; do

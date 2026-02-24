@@ -17,7 +17,7 @@ Without this skill, Claude Code can edit your ClojureDart code but has no way to
 - **[ClojureDart](https://github.com/nicot/cljd)** project with `pubspec.yaml`
 
 Optional:
-- **[AXe](https://github.com/nicot/axe)** for UI interaction (tap, swipe, type, accessibility tree)
+- **[AXe](https://github.com/cameroncooke/axe)** for UI interaction (tap, swipe, type, accessibility tree)
   ```bash
   brew tap cameroncooke/axe && brew install axe
   ```
@@ -61,13 +61,14 @@ export PATH="$HOME/.local/bin:$PATH"
 | `cljd-device-log` | Read iOS device logs — print statements, runtime errors |
 | `cljd-devices` | List simulators (`--booted`, `--json`) |
 | `cljd-errors` | Unified error check across build log + device log |
+| `cljd-wait-reload` | Wait for hot reload/restart completion or compilation error |
 
 ### UI Interaction (requires AXe)
 
 | Tool | Description |
 |------|-------------|
 | `cljd-ui-tree` | Accessibility tree — find elements and their coordinates (`--compact`, `--interactive`) |
-| `cljd-tap` | Tap by coordinates or accessibility label (`--label "Login"`) |
+| `cljd-tap` | Tap by coordinates or accessibility label with partial match (`--label "Login"`) |
 | `cljd-swipe` | Swipe by direction (`up`/`down`/`left`/`right`) or coordinates |
 | `cljd-type` | Type text into focused field |
 | `cljd-key` | Press hardware keys (`home`, `lock`, `siri`, etc.) |
@@ -104,7 +105,7 @@ cljd-type "hello@example.com"
 When your project contains `pubspec.yaml` or `.cljd` files, Claude Code automatically loads this skill via `SKILL.md`. The agent can then:
 
 1. Edit `.cljd` code
-2. Wait for hot reload (2-5 seconds)
+2. Run `cljd-wait-reload` to confirm hot reload completed (or detect compilation errors)
 3. Run `cljd-errors` to check for compile/runtime errors
 4. Run `cljd-screenshot` and read the image to verify UI changes
 5. Use `cljd-ui-tree` + `cljd-tap` to navigate the app
@@ -118,6 +119,7 @@ This gives Claude Code a full edit-verify-interact loop that previously required
 You:    "The login button is cut off on the right side, fix it"
 
 Claude: *reads the .cljd file, adjusts padding*
+        *runs cljd-wait-reload — Hot reload completed.*
         *runs cljd-errors — no errors*
         *runs cljd-screenshot — sees the button is now visible*
         "Fixed — I adjusted the horizontal padding from 8 to 16."
@@ -139,13 +141,13 @@ Images are resized with `sips` (macOS built-in) to reduce token usage when Claud
 ### `cljd-build-log`
 
 ```bash
-cljd-build-log                     # Last 50 lines
+cljd-build-log                     # Last 50 lines (filtered)
 cljd-build-log --errors            # Errors and warnings only
 cljd-build-log --last 100          # Last 100 lines
 cljd-build-log --since "Restarted application"
 ```
 
-Requires `cljd-flutter` to be running in another terminal.
+Requires `cljd-flutter` to be running in another terminal. Respects `.cljd-log-filter` (see Log Filtering below).
 
 ### `cljd-device-log`
 
@@ -157,6 +159,27 @@ cljd-device-log --app "Runner"     # Filter by process name
 ```
 
 App name is auto-detected from `pubspec.yaml` if present.
+
+### `cljd-errors`
+
+```bash
+cljd-errors                        # Check both build log + device log
+cljd-errors --build                # Build log only
+cljd-errors --device               # Device log only
+```
+
+Error sources are prefixed: `[BUILD]`, `[DART]`, `[FLUTTER]`, `[RUNTIME]`, `[DEVICE]`, `[L10N]`.
+
+Only checks from the last compilation start — old errors are not reported. Respects `.cljd-log-filter`.
+
+### `cljd-wait-reload`
+
+```bash
+cljd-wait-reload                   # Wait up to 10s (default)
+cljd-wait-reload --timeout 20      # Wait up to 20s
+```
+
+Detects already-completed reloads instantly by checking from the last compilation marker. Exit codes: 0 = reload detected, 1 = timeout, 2 = compilation error.
 
 ### `cljd-ui-tree`
 
@@ -177,9 +200,11 @@ cljd-ui-tree --interactive         # Buttons and text fields only
 
 ```bash
 cljd-tap 200 400                   # Tap at coordinates
-cljd-tap --label "Login"           # Tap by accessibility label
+cljd-tap --label "Login"           # Tap by accessibility label (partial match supported)
 cljd-tap --id "login_button"       # Tap by accessibility identifier
 ```
+
+`--label` first tries an exact match via AXe, then falls back to partial match by searching the accessibility tree for a label containing the given text.
 
 ### `cljd-swipe`
 
@@ -191,11 +216,37 @@ cljd-swipe right
 cljd-swipe 100 500 100 200         # Custom: from (100,500) to (100,200)
 ```
 
+## Log Filtering
+
+Build logs can be noisy with debug output. Create a `.cljd-log-filter` file in your project root (next to `pubspec.yaml`) to exclude matching lines from `cljd-build-log` and `cljd-errors` output.
+
+Each line is a fixed string — any log line containing that string is excluded.
+
+```
+# .cljd-log-filter
+flutter: [DEBUG] session/refresh-jwt
+flutter: [DEBUG] Writing `session` to SharedPreferences
+flutter: [DEBUG] Writing `user-id` to SharedPreferences
+```
+
+Since this file is project-specific and not typically committed, add it to your **global** gitignore:
+
+```bash
+echo '.cljd-log-filter' >> ~/.config/git/ignore
+```
+
+Or if you use `~/.gitignore_global`:
+
+```bash
+echo '.cljd-log-filter' >> ~/.gitignore_global
+```
+
 ## How It Works
 
 - **Screenshot**: `xcrun simctl io booted screenshot` + `sips --resampleHeight` for resize
 - **Build log**: `tee` captures `clj -M:cljd flutter` output to `/tmp/cljd_build.log`
 - **Device log**: `xcrun simctl spawn booted log show` with predicate filtering
+- **Error detection**: Scans from last compilation marker, checks build + device + l10n staleness
 - **UI interaction**: [AXe](https://github.com/cameroncooke/axe) accessibility automation tool
 
 ## License
