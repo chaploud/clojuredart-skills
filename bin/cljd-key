@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-key - Press hardware key on iOS Simulator via AXe
+# Usage: cljd-key KEY
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: cljd-key KEY"
+  echo ""
+  echo "Keys: home, lock, volumeUp, volumeDown"
+  echo ""
+  echo "Requires: axe (brew tap cameroncooke/axe && brew install axe)"
+  exit 0
+fi
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: cljd-key KEY" >&2
+  echo "Keys: home, lock, volumeUp, volumeDown" >&2
+  exit 1
+fi
+
+if ! command -v axe &>/dev/null; then
+  echo "ERROR: axe is not installed." >&2
+  echo "Install: brew tap cameroncooke/axe && brew install axe" >&2
+  exit 1
+fi
+
+UDID=$(xcrun simctl list devices booted --json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for runtime, devices in data.get('devices', {}).items():
+    for d in devices:
+        if d.get('state') == 'Booted':
+            print(d['udid'])
+            sys.exit(0)
+sys.exit(1)
+" 2>/dev/null) || {
+  echo "ERROR: No booted iOS Simulator found." >&2
+  exit 1
+}
+
+KEY="$1"
+
+case "$KEY" in
+  home)
+    axe button --udid "$UDID" --name home 2>/dev/null
+    ;;
+  lock)
+    axe button --udid "$UDID" --name lock 2>/dev/null
+    ;;
+  volumeUp|volumeup)
+    axe button --udid "$UDID" --name volumeUp 2>/dev/null
+    ;;
+  volumeDown|volumedown)
+    axe button --udid "$UDID" --name volumeDown 2>/dev/null
+    ;;
+  *)
+    echo "ERROR: Unknown key: $KEY" >&2
+    echo "Available: home, lock, volumeUp, volumeDown" >&2
+    exit 1
+    ;;
+esac
+echo "Pressed: $KEY"

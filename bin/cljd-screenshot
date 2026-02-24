@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-screenshot - Capture iOS Simulator screenshot with optional resize
+# Usage: cljd-screenshot [--scale HEIGHT] [--full] [--output PATH]
+
+SCALE=800
+OUTPUT="/tmp/cljd_screenshot.png"
+FULL=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --scale)
+      SCALE="$2"
+      shift 2
+      ;;
+    --full)
+      FULL=true
+      shift
+      ;;
+    --output)
+      OUTPUT="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: cljd-screenshot [--scale HEIGHT] [--full] [--output PATH]"
+      echo ""
+      echo "Options:"
+      echo "  --scale HEIGHT  Resize to HEIGHT pixels tall (default: 800)"
+      echo "  --full          Keep original size (no resize)"
+      echo "  --output PATH   Output file path (default: /tmp/cljd_screenshot.png)"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Check for booted simulator
+if ! xcrun simctl list devices booted 2>/dev/null | grep -q "Booted"; then
+  echo "ERROR: No booted iOS Simulator found." >&2
+  echo "Start a simulator first: open -a Simulator" >&2
+  exit 1
+fi
+
+# Capture screenshot
+TEMP_FILE="/tmp/cljd_screenshot_raw.png"
+xcrun simctl io booted screenshot --type=png "$TEMP_FILE" 2>/dev/null
+
+if [[ ! -f "$TEMP_FILE" ]]; then
+  echo "ERROR: Failed to capture screenshot." >&2
+  exit 1
+fi
+
+if [[ "$FULL" == "true" ]]; then
+  mv "$TEMP_FILE" "$OUTPUT"
+else
+  sips --resampleHeight "$SCALE" "$TEMP_FILE" --out "$OUTPUT" >/dev/null 2>&1
+  rm -f "$TEMP_FILE"
+fi
+
+echo "$OUTPUT"

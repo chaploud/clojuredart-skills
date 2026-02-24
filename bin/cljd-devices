@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-devices - List iOS Simulators
+# Usage: cljd-devices [--booted] [--json]
+
+BOOTED_ONLY=false
+JSON_OUTPUT=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --booted)
+      BOOTED_ONLY=true
+      shift
+      ;;
+    --json)
+      JSON_OUTPUT=true
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: cljd-devices [--booted] [--json]"
+      echo ""
+      echo "Options:"
+      echo "  --booted  Show only booted simulators"
+      echo "  --json    Output as JSON"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$JSON_OUTPUT" == "true" ]]; then
+  if [[ "$BOOTED_ONLY" == "true" ]]; then
+    xcrun simctl list devices --json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+booted = []
+for runtime, devices in data.get('devices', {}).items():
+    for d in devices:
+        if d.get('state') == 'Booted':
+            d['runtime'] = runtime
+            booted.append(d)
+json.dump(booted, sys.stdout, indent=2)
+print()
+"
+  else
+    xcrun simctl list devices --json
+  fi
+else
+  if [[ "$BOOTED_ONLY" == "true" ]]; then
+    xcrun simctl list devices booted 2>/dev/null | grep -v "^--" | grep -v "^$" || echo "No booted simulators."
+  else
+    xcrun simctl list devices 2>/dev/null | grep -v "^$"
+  fi
+fi

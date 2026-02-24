@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-tap - Tap at coordinates on iOS Simulator via AXe
+# Usage: cljd-tap X Y
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: cljd-tap X Y"
+  echo ""
+  echo "Tap at the specified coordinates on the booted iOS Simulator."
+  echo "Requires: axe (brew tap cameroncooke/axe && brew install axe)"
+  exit 0
+fi
+
+if [[ $# -lt 2 ]]; then
+  echo "Usage: cljd-tap X Y" >&2
+  exit 1
+fi
+
+if ! command -v axe &>/dev/null; then
+  echo "ERROR: axe is not installed." >&2
+  echo "Install: brew tap cameroncooke/axe && brew install axe" >&2
+  exit 1
+fi
+
+UDID=$(xcrun simctl list devices booted --json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for runtime, devices in data.get('devices', {}).items():
+    for d in devices:
+        if d.get('state') == 'Booted':
+            print(d['udid'])
+            sys.exit(0)
+sys.exit(1)
+" 2>/dev/null) || {
+  echo "ERROR: No booted iOS Simulator found." >&2
+  exit 1
+}
+
+axe tap --udid "$UDID" --x "$1" --y "$2" 2>/dev/null
+echo "Tapped at ($1, $2)"

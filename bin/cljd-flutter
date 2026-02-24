@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-flutter - Build wrapper for ClojureDart with log capture
+# Usage: cljd-flutter [--flavor FLAVOR] [flutter args...]
+# Run this in a separate terminal. Logs are captured to /tmp/cljd_build.log
+
+LOG_FILE="/tmp/cljd_build.log"
+PID_FILE="/tmp/cljd_flutter.pid"
+
+show_help() {
+  echo "Usage: cljd-flutter [--flavor FLAVOR] [flutter args...]"
+  echo ""
+  echo "Wrapper around 'clj -M:cljd flutter' that captures output to $LOG_FILE"
+  echo ""
+  echo "Examples:"
+  echo "  cljd-flutter --flavor dev"
+  echo '  cljd-flutter --flavor dev -d "iPhone 17 Pro"'
+  echo ""
+  echo "The build log can be read by cljd-build-log."
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  show_help
+  exit 0
+fi
+
+# Store PID for potential process management
+echo $$ > "$PID_FILE"
+
+# Clean up PID file on exit
+cleanup() {
+  rm -f "$PID_FILE"
+}
+trap cleanup EXIT
+
+echo "=== cljd-flutter started at $(date) ===" | tee "$LOG_FILE"
+echo "=== Args: $* ===" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+
+# Run clj -M:cljd flutter with all arguments, tee to log
+exec clj -M:cljd flutter "$@" 2>&1 | tee -a "$LOG_FILE"

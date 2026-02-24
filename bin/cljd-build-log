@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-build-log - Read and filter ClojureDart build logs
+# Usage: cljd-build-log [--errors] [--last N] [--since PATTERN]
+
+LOG_FILE="/tmp/cljd_build.log"
+LAST=50
+ERRORS_ONLY=false
+SINCE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --errors)
+      ERRORS_ONLY=true
+      shift
+      ;;
+    --last)
+      LAST="$2"
+      shift 2
+      ;;
+    --since)
+      SINCE="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: cljd-build-log [--errors] [--last N] [--since PATTERN]"
+      echo ""
+      echo "Options:"
+      echo "  --errors        Show only errors and warnings"
+      echo "  --last N        Show last N lines (default: 50)"
+      echo '  --since PATTERN Show lines after last occurrence of PATTERN'
+      echo ""
+      echo "Examples:"
+      echo "  cljd-build-log --errors"
+      echo '  cljd-build-log --since "Restarted application"'
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! -f "$LOG_FILE" ]]; then
+  echo "ERROR: Build log not found at $LOG_FILE" >&2
+  echo "Start a build with: cljd-flutter --flavor dev" >&2
+  exit 1
+fi
+
+# Get content based on --since or --last
+if [[ -n "$SINCE" ]]; then
+  # Find line number of last occurrence of pattern
+  LINE_NUM=$(grep -n "$SINCE" "$LOG_FILE" | tail -1 | cut -d: -f1)
+  if [[ -z "$LINE_NUM" ]]; then
+    echo "Pattern '$SINCE' not found in log. Showing last $LAST lines." >&2
+    CONTENT=$(tail -n "$LAST" "$LOG_FILE")
+  else
+    CONTENT=$(tail -n +"$LINE_NUM" "$LOG_FILE")
+  fi
+else
+  CONTENT=$(tail -n "$LAST" "$LOG_FILE")
+fi
+
+if [[ "$ERRORS_ONLY" == "true" ]]; then
+  # Filter for error patterns
+  echo "$CONTENT" | grep -iE \
+    'error|exception|failed|fatal|warning|ExceptionInfo|══.*EXCEPTION|CompilationError|not found|undefined|overflow|null check|assertion' \
+    || echo "No errors found."
+else
+  echo "$CONTENT"
+fi

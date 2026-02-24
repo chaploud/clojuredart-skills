@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-device-log - Read iOS Simulator device logs
+# Usage: cljd-device-log [--last DURATION] [--app NAME] [--level LEVEL]
+
+LAST="60s"
+APP=""
+LEVEL=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --last)
+      LAST="$2"
+      shift 2
+      ;;
+    --app)
+      APP="$2"
+      shift 2
+      ;;
+    --level)
+      LEVEL="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: cljd-device-log [--last DURATION] [--app NAME] [--level LEVEL]"
+      echo ""
+      echo "Options:"
+      echo "  --last DURATION  Time window (default: 60s). Examples: 30s, 5m, 1h"
+      echo "  --app NAME       Filter by app/process name (auto-detected from pubspec.yaml)"
+      echo "  --level LEVEL    Filter by level: default, info, debug, error, fault"
+      echo ""
+      echo "Examples:"
+      echo "  cljd-device-log"
+      echo "  cljd-device-log --last 5m --level error"
+      echo '  cljd-device-log --app "Runner"'
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Check for booted simulator
+if ! xcrun simctl list devices booted 2>/dev/null | grep -q "Booted"; then
+  echo "ERROR: No booted iOS Simulator found." >&2
+  exit 1
+fi
+
+# Auto-detect app name from pubspec.yaml if not specified
+if [[ -z "$APP" ]]; then
+  if [[ -f "pubspec.yaml" ]]; then
+    APP=$(python3 -c "
+import re, sys
+with open('pubspec.yaml') as f:
+    for line in f:
+        m = re.match(r'^name:\s*(\S+)', line)
+        if m:
+            print(m.group(1))
+            sys.exit(0)
+" 2>/dev/null || true)
+  fi
+fi
+
+# Convert duration to --last format for log show
+# xcrun simctl spawn log show expects relative time like "60s", "5m"
+# Convert to seconds for the --last parameter
+SECONDS_AGO=""
+if [[ "$LAST" =~ ^([0-9]+)s$ ]]; then
+  SECONDS_AGO="${BASH_REMATCH[1]}"
+elif [[ "$LAST" =~ ^([0-9]+)m$ ]]; then
+  SECONDS_AGO=$(( ${BASH_REMATCH[1]} * 60 ))
+elif [[ "$LAST" =~ ^([0-9]+)h$ ]]; then
+  SECONDS_AGO=$(( ${BASH_REMATCH[1]} * 3600 ))
+else
+  echo "ERROR: Invalid duration format: $LAST (use Ns, Nm, or Nh)" >&2
+  exit 1
+fi
+
+# Build predicate
+PREDICATES=()
+if [[ -n "$APP" ]]; then
+  PREDICATES+=("process == \"$APP\" OR process == \"Runner\"")
+fi
+if [[ -n "$LEVEL" ]]; then
+  case "$LEVEL" in
+    error)  PREDICATES+=("messageType == error OR messageType == fault") ;;
+    fault)  PREDICATES+=("messageType == fault") ;;
+    info)   PREDICATES+=("messageType == info") ;;
+    debug)  PREDICATES+=("messageType == debug") ;;
+    *)      PREDICATES+=("messageType == $LEVEL") ;;
+  esac
+fi
+
+PREDICATE=""
+if [[ ${#PREDICATES[@]} -gt 0 ]]; then
+  PREDICATE=$(IFS=" AND "; printf '(%s)' "${PREDICATES[*]}")
+fi
+
+# Build command
+CMD=(xcrun simctl spawn booted log show --last "${SECONDS_AGO}s" --style compact)
+if [[ -n "$PREDICATE" ]]; then
+  CMD+=(--predicate "$PREDICATE")
+fi
+
+"${CMD[@]}" 2>/dev/null || echo "No log entries found."

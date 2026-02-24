@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-ui-tree - Get accessibility tree from iOS Simulator via AXe
+# Usage: cljd-ui-tree [--compact] [--interactive]
+
+MODE="full"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --compact)
+      MODE="compact"
+      shift
+      ;;
+    --interactive)
+      MODE="interactive"
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: cljd-ui-tree [--compact] [--interactive]"
+      echo ""
+      echo "Options:"
+      echo "  --compact      One line per element with coordinates (token-efficient)"
+      echo "  --interactive  Show only buttons, text fields, and other interactive elements"
+      echo ""
+      echo "Requires: axe (brew tap cameroncooke/axe && brew install axe)"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if ! command -v axe &>/dev/null; then
+  echo "ERROR: axe is not installed." >&2
+  echo "Install: brew tap cameroncooke/axe && brew install axe" >&2
+  exit 1
+fi
+
+# Get booted device UDID
+UDID=$(xcrun simctl list devices booted --json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for runtime, devices in data.get('devices', {}).items():
+    for d in devices:
+        if d.get('state') == 'Booted':
+            print(d['udid'])
+            sys.exit(0)
+sys.exit(1)
+" 2>/dev/null) || {
+  echo "ERROR: No booted iOS Simulator found." >&2
+  exit 1
+}
+
+case "$MODE" in
+  full)
+    axe dump --udid "$UDID" 2>/dev/null
+    ;;
+  compact)
+    axe dump --udid "$UDID" 2>/dev/null | python3 -c "
+import json, sys
+
+def parse_compact(data):
+    results = []
+    def walk(node, depth=0):
+        role = node.get('role', '')
+        label = node.get('label', '')
+        value = node.get('value', '')
+        frame = node.get('frame', {})
+        x = frame.get('x', 0)
+        y = frame.get('y', 0)
+        w = frame.get('width', 0)
+        h = frame.get('height', 0)
+
+        parts = [f'[{role}]']
+        if label:
+            parts.append(f'\"{label}\"')
+        parts.append(f'(x:{int(x)} y:{int(y)} w:{int(w)} h:{int(h)})')
+        if value:
+            parts.append(f'value=\"{value}\"')
+
+        if role and role not in ('None', 'Other', 'Group', 'Window', 'Application'):
+            results.append(' '.join(parts))
+
+        for child in node.get('children', []):
+            walk(child, depth + 1)
+
+    if isinstance(data, list):
+        for item in data:
+            walk(item)
+    else:
+        walk(data)
+    return results
+
+try:
+    data = json.load(sys.stdin)
+    for line in parse_compact(data):
+        print(line)
+except json.JSONDecodeError:
+    # If not JSON, pass through raw output
+    sys.stdin.seek(0)
+    print(sys.stdin.read())
+except Exception as e:
+    print(f'Error parsing tree: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+    ;;
+  interactive)
+    axe dump --udid "$UDID" 2>/dev/null | python3 -c "
+import json, sys
+
+INTERACTIVE_ROLES = {
+    'Button', 'TextField', 'SecureTextField', 'TextArea',
+    'Switch', 'Slider', 'Picker', 'Link', 'Tab',
+    'Checkbox', 'RadioButton', 'Toggle', 'Stepper',
+    'SegmentedControl', 'PopUpButton', 'MenuItem',
+}
+
+def parse_interactive(data):
+    results = []
+    def walk(node):
+        role = node.get('role', '')
+        label = node.get('label', '')
+        value = node.get('value', '')
+        frame = node.get('frame', {})
+        x = frame.get('x', 0)
+        y = frame.get('y', 0)
+        w = frame.get('width', 0)
+        h = frame.get('height', 0)
+
+        if role in INTERACTIVE_ROLES:
+            parts = [f'[{role}]']
+            if label:
+                parts.append(f'\"{label}\"')
+            parts.append(f'(x:{int(x)} y:{int(y)} w:{int(w)} h:{int(h)})')
+            if value:
+                parts.append(f'value=\"{value}\"')
+            results.append(' '.join(parts))
+
+        for child in node.get('children', []):
+            walk(child)
+
+    if isinstance(data, list):
+        for item in data:
+            walk(item)
+    else:
+        walk(data)
+    return results
+
+try:
+    data = json.load(sys.stdin)
+    for line in parse_interactive(data):
+        print(line)
+except json.JSONDecodeError:
+    sys.stdin.seek(0)
+    print(sys.stdin.read())
+except Exception as e:
+    print(f'Error parsing tree: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+    ;;
+esac

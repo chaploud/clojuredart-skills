@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# cljd-errors - Integrated error check from build log + device log
+# Usage: cljd-errors [--build] [--device]
+
+CHECK_BUILD=true
+CHECK_DEVICE=true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build)
+      CHECK_BUILD=true
+      CHECK_DEVICE=false
+      shift
+      ;;
+    --device)
+      CHECK_BUILD=false
+      CHECK_DEVICE=true
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: cljd-errors [--build] [--device]"
+      echo ""
+      echo "Options:"
+      echo "  --build   Check build log only"
+      echo "  --device  Check device log only"
+      echo ""
+      echo "Without flags, checks both sources."
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+FOUND_ERRORS=false
+BUILD_LOG="/tmp/cljd_build.log"
+
+if [[ "$CHECK_BUILD" == "true" ]]; then
+  if [[ -f "$BUILD_LOG" ]]; then
+    # Check last 200 lines for errors
+    RECENT=$(tail -n 200 "$BUILD_LOG")
+
+    # ClojureDart compile errors
+    CLJD_ERRORS=$(echo "$RECENT" | grep -n "clojure.lang.ExceptionInfo\|CompilationError" 2>/dev/null || true)
+    if [[ -n "$CLJD_ERRORS" ]]; then
+      FOUND_ERRORS=true
+      while IFS= read -r line; do
+        echo "[BUILD] $line"
+      done <<< "$CLJD_ERRORS"
+    fi
+
+    # Dart compile errors (lib/*.dart:LINE:COL: Error:)
+    DART_ERRORS=$(echo "$RECENT" | grep -E '\.dart:[0-9]+:[0-9]+: Error:' 2>/dev/null || true)
+    if [[ -n "$DART_ERRORS" ]]; then
+      FOUND_ERRORS=true
+      while IFS= read -r line; do
+        echo "[DART]  $line"
+      done <<< "$DART_ERRORS"
+    fi
+
+    # Flutter exceptions
+    FLUTTER_ERRORS=$(echo "$RECENT" | grep -E '══.*EXCEPTION|EXCEPTION CAUGHT' 2>/dev/null || true)
+    if [[ -n "$FLUTTER_ERRORS" ]]; then
+      FOUND_ERRORS=true
+      while IFS= read -r line; do
+        echo "[FLUTTER] $line"
+      done <<< "$FLUTTER_ERRORS"
+    fi
+
+    # General errors/failures
+    GENERAL_ERRORS=$(echo "$RECENT" | grep -iE '^Error:|^FAILURE:|Build failed|Gradle build failed' 2>/dev/null || true)
+    if [[ -n "$GENERAL_ERRORS" ]]; then
+      FOUND_ERRORS=true
+      while IFS= read -r line; do
+        echo "[BUILD] $line"
+      done <<< "$GENERAL_ERRORS"
+    fi
+  else
+    echo "[INFO] No build log found at $BUILD_LOG"
+  fi
+fi
+
+if [[ "$CHECK_DEVICE" == "true" ]]; then
+  if xcrun simctl list devices booted 2>/dev/null | grep -q "Booted"; then
+    # Get recent device errors (last 30 seconds)
+    DEVICE_ERRORS=$(xcrun simctl spawn booted log show --last 30s --style compact \
+      --predicate '(messageType == error OR messageType == fault) AND (process == "Runner" OR process CONTAINS "flutter")' \
+      2>/dev/null || true)
+    if [[ -n "$DEVICE_ERRORS" ]] && [[ "$DEVICE_ERRORS" != *"No entries"* ]]; then
+      FOUND_ERRORS=true
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && echo "[DEVICE] $line"
+      done <<< "$DEVICE_ERRORS"
+    fi
+  fi
+fi
+
+if [[ "$FOUND_ERRORS" == "false" ]]; then
+  echo "No errors found."
+fi
