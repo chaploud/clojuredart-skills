@@ -2,30 +2,141 @@
 set -euo pipefail
 
 # cljd-flutter - Build wrapper for ClojureDart with log capture
-# Usage: cljd-flutter [--flavor FLAVOR] [flutter args...]
-# Run this in a separate terminal. Logs are captured to /tmp/cljd_build.log
-# Supports external commands via FIFO (e.g. cljd-hot-restart)
+#
+# Usage:
+#   cljd-flutter [--flavor FLAVOR] [flutter args...]          # Foreground (current terminal)
+#   cljd-flutter --tmux [--flavor FLAVOR] [flutter args...]   # Detached tmux session
+#   cljd-flutter --tmux-replace [--flavor FLAVOR] [...]       # Kill existing tmux session, then start fresh
+#   cljd-flutter --tmux-stop                                  # Stop the tmux session
+#   cljd-flutter --tmux-attach                                # Attach to the running tmux session
+#
+# In tmux mode the wrapper launches `clj -M:cljd flutter ...` inside a detached
+# session named "cljdf". Humans can `tmux attach -t cljdf` to inspect or detach
+# with Ctrl-b d, and agents can drive it with `tmux send-keys -t cljdf ...` +
+# `tmux capture-pane -t cljdf -p`. Logs are still tee'd to /tmp/cljd_build.log
+# so cljd-build-log / cljd-errors work unchanged regardless of mode.
 
 LOG_FILE="/tmp/cljd_build.log"
 PID_FILE="/tmp/cljd_flutter.pid"
 COMMAND_PIPE="/tmp/cljd_flutter_cmd"
+TMUX_SESSION="cljdf"
 
 show_help() {
-  echo "Usage: cljd-flutter [--flavor FLAVOR] [flutter args...]"
-  echo ""
-  echo "Wrapper around 'clj -M:cljd flutter' that captures output to $LOG_FILE"
-  echo ""
-  echo "Examples:"
-  echo "  cljd-flutter --flavor dev"
-  echo '  cljd-flutter --flavor dev -d "iPhone 17 Pro"'
-  echo ""
-  echo "The build log can be read by cljd-build-log."
-  echo "Hot restart can be triggered externally via cljd-hot-restart."
+  cat <<'EOF'
+Usage: cljd-flutter [mode] [--flavor FLAVOR] [flutter args...]
+
+Modes:
+  (default)        Run in the current terminal (foreground).
+  --tmux           Run in a detached tmux session named "cljdf".
+  --tmux-replace   Kill any existing "cljdf" tmux session, then start fresh.
+  --tmux-stop      Stop the running "cljdf" tmux session.
+  --tmux-attach    Attach to the running "cljdf" tmux session.
+
+Examples:
+  cljd-flutter --flavor dev
+  cljd-flutter --tmux --flavor dev
+  cljd-flutter --tmux-replace --flavor dev -d "iPhone 17 Pro"
+  cljd-flutter --tmux-stop
+
+Build logs are always tee'd to /tmp/cljd_build.log regardless of mode, so
+cljd-build-log and cljd-errors work the same in all modes.
+
+Hot restart can be triggered externally via cljd-hot-restart, or inside the
+tmux session via: tmux send-keys -t cljdf 'R' Enter
+
+Note: CC / CXX / LD / AR / AS are unset before launching clj -M:cljd flutter
+to prevent host compiler env vars (e.g. a user-installed gcc-15) from leaking
+into Xcode's CompileC phase and breaking pod native code compilation.
+EOF
 }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   show_help
   exit 0
+fi
+
+# Parse tmux mode before forwarding the rest to clj.
+MODE="foreground"
+case "${1:-}" in
+  --tmux)         MODE="tmux";         shift ;;
+  --tmux-replace) MODE="tmux-replace"; shift ;;
+  --tmux-stop)    MODE="tmux-stop";    shift ;;
+  --tmux-attach)  MODE="tmux-attach";  shift ;;
+esac
+
+tmux_session_exists() {
+  tmux has-session -t "$TMUX_SESSION" 2>/dev/null
+}
+
+if [[ "$MODE" == "tmux-stop" ]]; then
+  if tmux_session_exists; then
+    tmux kill-session -t "$TMUX_SESSION"
+    echo "[cljd-flutter] tmux session '$TMUX_SESSION' stopped."
+  else
+    echo "[cljd-flutter] tmux session '$TMUX_SESSION' is not running."
+  fi
+  exit 0
+fi
+
+if [[ "$MODE" == "tmux-attach" ]]; then
+  if ! tmux_session_exists; then
+    echo "[cljd-flutter] tmux session '$TMUX_SESSION' is not running. Start it with:" >&2
+    echo "  cljd-flutter --tmux --flavor dev" >&2
+    exit 1
+  fi
+  exec tmux attach -t "$TMUX_SESSION"
+fi
+
+if [[ "$MODE" == "tmux" || "$MODE" == "tmux-replace" ]]; then
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "[cljd-flutter] tmux is not installed. Install with: brew install tmux" >&2
+    exit 1
+  fi
+
+  if tmux_session_exists; then
+    if [[ "$MODE" == "tmux-replace" ]]; then
+      tmux kill-session -t "$TMUX_SESSION"
+    else
+      echo "[cljd-flutter] tmux session '$TMUX_SESSION' already exists." >&2
+      echo "  Attach: tmux attach -t $TMUX_SESSION" >&2
+      echo "  Replace: cljd-flutter --tmux-replace ${*}" >&2
+      echo "  Stop:    cljd-flutter --tmux-stop" >&2
+      exit 1
+    fi
+  fi
+
+  # Re-exec ourselves inside the new tmux session in foreground mode.
+  # All args after the mode flag are forwarded verbatim.
+  # printf '%q ' shell-escapes each argument so values containing spaces
+  # (e.g. -d "iPhone 17 Pro") survive the tmux single-string command form.
+  self="$(command -v cljd-flutter)"
+  cmd=$(printf '%q ' "$self" "$@")
+  tmux new-session -d -s "$TMUX_SESSION" "$cmd"
+  echo "[cljd-flutter] Started in tmux session '$TMUX_SESSION'."
+  echo "  Attach (human):   tmux attach -t $TMUX_SESSION"
+  echo "  Detach in tmux:   Ctrl-b d"
+  echo "  Send hot restart: tmux send-keys -t $TMUX_SESSION 'R' Enter"
+  echo "  Capture output:   tmux capture-pane -t $TMUX_SESSION -p"
+  echo "  Stop:             cljd-flutter --tmux-stop"
+  echo "  Build log:        cljd-build-log"
+  exit 0
+fi
+
+# ---- foreground mode ----
+
+# Show a hint if the user runs this outside tmux. Under the hood cljd-flutter
+# is long-running, and a crashing flutter subprocess can be hard to recover
+# from in a plain terminal (nothing watches the session). Recommending the
+# tmux wrapper keeps the session resilient and lets agents drive it remotely.
+if [[ -z "${TMUX:-}" && "${CLJD_FLUTTER_TMUX_HINT:-1}" != "0" ]]; then
+  cat >&2 <<EOF
+[cljd-flutter] Hint: running in the current terminal.
+  For a more robust setup (crash recovery, agent-driven hot restart, etc.),
+  consider launching inside a detached tmux session:
+    cljd-flutter --tmux $*
+  Silence this hint with CLJD_FLUTTER_TMUX_HINT=0.
+
+EOF
 fi
 
 # Store PID for potential process management
@@ -51,6 +162,12 @@ echo "" | tee -a "$LOG_FILE"
 # Merge terminal stdin and command pipe into Flutter's stdin.
 # Background loop reads from the FIFO; foreground cat reads from terminal.
 # Both feed into the pipeline to clj.
+#
+# env -u CC -u CXX -u LD -u AR -u AS strips host compiler env vars that some
+# environments (nix-darwin, home-manager, user shell profiles) leak. If these
+# reach Xcode's CompileC phase, clang-specific flags are passed to whichever
+# compiler CC points at (e.g. GNU gcc-15) and pod native builds fail with
+# "unrecognized command-line option" errors.
 {
   # Background: continuously read from command pipe
   while true; do
@@ -60,4 +177,4 @@ echo "" | tee -a "$LOG_FILE"
 
   # Foreground: read from terminal stdin
   cat
-} | clj -M:cljd flutter "$@" 2>&1 | tee -a "$LOG_FILE"
+} | env -u CC -u CXX -u LD -u AR -u AS clj -M:cljd flutter "$@" 2>&1 | tee -a "$LOG_FILE"

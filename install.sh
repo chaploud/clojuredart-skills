@@ -46,6 +46,13 @@ else
   echo "       Install: brew tap cameroncooke/axe && brew install axe"
 fi
 
+if command -v tmux &>/dev/null; then
+  echo "  tmux: OK ('cljd-flutter --tmux' mode available)"
+else
+  echo "  tmux: NOT FOUND (recommended for robust build sessions)"
+  echo "        Install: brew install tmux"
+fi
+
 echo ""
 
 # 2. Create ~/.local/bin if needed
@@ -107,6 +114,7 @@ echo "Installation complete!"
 echo ""
 echo "Quick start:"
 echo "  1. Start iOS Simulator: open -a Simulator"
-echo "  2. In a separate terminal: cljd-flutter --flavor dev"
+echo "  2. Launch build in detached tmux session: cljd-flutter --tmux --flavor dev"
+echo "     (Or in the current terminal: cljd-flutter --flavor dev)"
 echo "  3. Check errors: cljd-errors"
 echo "  4. Take screenshot: cljd-screenshot"

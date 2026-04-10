@@ -16,6 +16,13 @@ Without this skill, Claude Code can edit your ClojureDart code but has no way to
 - **Xcode** with Command Line Tools (`xcode-select --install`)
 - **[ClojureDart](https://github.com/nicot/cljd)** project with `pubspec.yaml`
 
+Recommended:
+- **tmux** (`brew install tmux`) — enables `cljd-flutter --tmux` mode so the
+  Flutter build process lives in a detached session that survives terminal
+  crashes and can be driven by agents via `tmux send-keys` / `tmux capture-pane`.
+  Without tmux the fallback foreground mode still works, but broken builds
+  leave the terminal stuck.
+
 Optional:
 - **[AXe](https://github.com/cameroncooke/axe)** for UI interaction (tap, swipe, type, accessibility tree)
   ```bash
@@ -80,8 +87,10 @@ export PATH="$HOME/.local/bin:$PATH"
 # 1. Start a simulator
 open -a Simulator
 
-# 2. In a SEPARATE terminal, start the build with log capture
-cljd-flutter --flavor dev
+# 2. Start the build in a detached tmux session (recommended)
+cljd-flutter --tmux --flavor dev
+# Logs are still captured to /tmp/cljd_build.log. Attach with `tmux attach -t cljdf`
+# if you want to watch interactively; detach with Ctrl-b d.
 
 # 3. Check for errors
 cljd-errors
@@ -99,6 +108,11 @@ cljd-ui-tree --compact
 cljd-tap --label "Login"
 cljd-swipe up
 cljd-type "hello@example.com"
+
+# 7. When the build breaks (CompileC errors, kernel_snapshot etc.)
+tmux kill-session -t cljdf
+clj -M:cljd clean && fvm flutter clean
+cljd-flutter --tmux --flavor dev
 ```
 
 ## Usage with Claude Code

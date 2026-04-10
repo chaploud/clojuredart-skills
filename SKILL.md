@@ -86,12 +86,46 @@ in a separate terminal.
 
 ### Build Wrapper (`cljd-flutter`)
 
-**User runs this in a separate terminal** — not for Claude to invoke directly.
-It wraps `clj -M:cljd flutter` and captures output to `/tmp/cljd_build.log`.
+Wraps `clj -M:cljd flutter` and captures output to `/tmp/cljd_build.log`.
+Also unsets `CC` / `CXX` / `LD` / `AR` / `AS` from the inherited environment
+before launching, to prevent host compiler env vars (e.g. a user-installed
+`gcc-15`) from leaking into Xcode's CompileC phase and breaking pod native
+code compilation.
+
+**Preferred: tmux mode.** The wrapper can launch itself inside a detached
+tmux session so that (a) the Flutter process survives the terminal the user
+started it from, (b) humans can `tmux attach` to inspect interactively, and
+(c) Claude can drive it remotely via `tmux send-keys` / `tmux capture-pane`.
+
+```bash
+cljd-flutter --tmux --flavor dev          # Start in detached tmux session 'cljdf'
+cljd-flutter --tmux-replace --flavor dev  # Kill existing session, then start fresh
+cljd-flutter --tmux-stop                  # Stop the session
+cljd-flutter --tmux-attach                # Attach for interactive inspection
+```
+
+Inside tmux you can send keystrokes to Flutter's stdin without attaching:
+
+```bash
+tmux send-keys -t cljdf 'R' Enter         # Hot restart
+tmux send-keys -t cljdf 'r' Enter         # Hot reload
+tmux send-keys -t cljdf 'w' Enter         # Dump widget tree
+tmux capture-pane -t cljdf -p | tail -40  # Snapshot current pane output
+tmux has-session -t cljdf                 # Check if running
+```
+
+This makes Claude fully able to recover from broken builds autonomously
+(kill + clean + restart) without asking the user to click around.
+
+**Fallback: foreground mode (current terminal).** Still supported, and still
+captures logs to `/tmp/cljd_build.log`, but if the Flutter subprocess crashes
+the terminal is blocked and Claude can't restart it. The wrapper prints a
+hint suggesting `--tmux` when run outside tmux.
 
 ```bash
 cljd-flutter --flavor dev
 cljd-flutter --flavor dev -d "iPhone 17 Pro"
+CLJD_FLUTTER_TMUX_HINT=0 cljd-flutter --flavor dev   # Silence the hint
 ```
 
 ### Device Log (`cljd-device-log`)
@@ -219,6 +253,76 @@ flutter: [DEBUG] session/refresh-jwt
 flutter: [DEBUG] Writing `session` to SharedPreferences
 ```
 
+## Agent Playbook: Driving `cljd-flutter` Over tmux
+
+When the user runs `cljd-flutter --tmux --flavor dev`, the agent can
+autonomously manage the Flutter process without blocking on human input.
+This is the preferred path because a broken build would otherwise leave
+the current terminal stuck.
+
+### Health check
+
+```bash
+tmux has-session -t cljdf && echo running || echo not running
+```
+
+Treat a missing session as "nothing to drive" and ask the user (or start
+a new one if the task allows it) to launch `cljd-flutter --tmux --flavor dev`.
+
+### Read the current pane output
+
+```bash
+tmux capture-pane -t cljdf -p | tail -60
+```
+
+This is the authoritative "what is Flutter saying right now?" view. Prefer
+this over `cljd-build-log` for the very latest in-progress state.
+`cljd-build-log` is still the right place for searchable history.
+
+### Inject keystrokes (send to Flutter stdin)
+
+```bash
+tmux send-keys -t cljdf 'r' Enter     # Hot reload
+tmux send-keys -t cljdf 'R' Enter     # Hot restart
+tmux send-keys -t cljdf 'w' Enter     # Dump widget tree
+tmux send-keys -t cljdf 'p' Enter     # Toggle debugPaintSize
+tmux send-keys -t cljdf 'q' Enter     # Quit flutter run
+```
+
+### Recovery playbook — "the build is broken and I can't reach it"
+
+```bash
+# 1. Stop the dead session (ignore error if already gone).
+tmux kill-session -t cljdf 2>/dev/null || true
+
+# 2. Clean caches that commonly cause breakage.
+clj -M:cljd clean
+fvm flutter clean      # or: flutter clean
+
+# 3. Start a fresh tmux session.
+cljd-flutter --tmux --flavor dev
+
+# 4. Wait for the first build to finish, then verify.
+#    cljd-flutter inside tmux tees to /tmp/cljd_build.log as usual.
+cljd-wait-reload --timeout 120 || cljd-errors
+```
+
+Do NOT retry the same build repeatedly without cleaning first if the
+error is a CompileC / kernel_snapshot / Podfile-level issue — those are
+almost always stale state, not source bugs, and a clean rebuild resolves
+them without code changes.
+
+### Debugging workflow tip
+
+To "step through" an issue without losing context:
+
+```bash
+tmux capture-pane -t cljdf -p -S -500 > /tmp/pane.txt  # last 500 lines
+```
+
+This gives the agent a full transcript to grep through, without being
+noisy about ANSI escapes or needing to attach.
+
 ## Important Notes
 
 - **Never use `--follow` or `-f` flags** with any log commands. They block indefinitely.
@@ -238,3 +342,10 @@ flutter: [DEBUG] Writing `session` to SharedPreferences
   fall back to asking the user to press `R` in the cljd-flutter terminal.
 - **Coordinate system**: AXe uses logical points (not pixels). The coordinates from
   `cljd-ui-tree` output can be used directly with `cljd-tap`.
+- **Host compiler env vars (CC / CXX)**: `cljd-flutter` unsets these before
+  launching. If you see Xcode CompileC errors like
+  `gcc-15: error: unrecognized command-line option '-target'`, the cause is
+  almost always `CC` pointing at a non-clang compiler that's been inherited
+  from the parent shell (nix-darwin, direnv, home-manager, etc.). The wrapper
+  handles this, but if you invoke `clj -M:cljd flutter` or `fvm flutter build`
+  directly, you must `env -u CC -u CXX ...` yourself.
