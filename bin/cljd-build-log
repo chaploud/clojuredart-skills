@@ -2,17 +2,22 @@
 set -euo pipefail
 
 # cljd-build-log - Read and filter ClojureDart build logs
-# Usage: cljd-build-log [--errors] [--last N] [--since PATTERN]
+# Usage: cljd-build-log [--errors] [--app] [--last N] [--since PATTERN]
 
 LOG_FILE="/tmp/cljd_build.log"
 LAST=50
 ERRORS_ONLY=false
+APP_ONLY=false
 SINCE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --errors)
       ERRORS_ONLY=true
+      shift
+      ;;
+    --app)
+      APP_ONLY=true
       shift
       ;;
     --last)
@@ -24,15 +29,20 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      echo "Usage: cljd-build-log [--errors] [--last N] [--since PATTERN]"
+      echo "Usage: cljd-build-log [--errors] [--app] [--last N] [--since PATTERN]"
       echo ""
       echo "Options:"
       echo "  --errors        Show only errors and warnings"
+      echo "  --app           Show only Dart app output (allowlist):"
+      echo "                  I/flutter ( pid): ... (Android) and flutter: ... (iOS)."
+      echo "                  Drops framework/emulator noise like D/EGL_emulation and"
+      echo "                  I/FlutterActivityAndFragmentDelegate."
       echo "  --last N        Show last N lines (default: 50)"
       echo '  --since PATTERN Show lines after last occurrence of PATTERN'
       echo ""
       echo "Examples:"
       echo "  cljd-build-log --errors"
+      echo "  cljd-build-log --app --last 200"
       echo '  cljd-build-log --since "Restarted application"'
       exit 0
       ;;
@@ -85,6 +95,13 @@ fi
 
 # Apply project-level log filter
 CONTENT=$(echo "$CONTENT" | _apply_log_filter)
+
+# Keep only Dart app output. Lowercase "flutter" + space is required to
+# distinguish app print() lines (I/flutter ( pid):) from framework chatter
+# such as I/FlutterActivityAndFragmentDelegate; ^flutter: covers iOS.
+if [[ "$APP_ONLY" == "true" ]]; then
+  CONTENT=$(echo "$CONTENT" | grep -E '[A-Z]/flutter \(|^flutter:' || true)
+fi
 
 if [[ "$ERRORS_ONLY" == "true" ]]; then
   # Filter for error patterns
