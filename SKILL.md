@@ -242,7 +242,56 @@ cljd-key home                      # Home button
 cljd-key lock                      # Lock screen
 ```
 
+### Push Notifications
+
+各プロジェクトが自分のリポジトリに `bin/push-notification-{ios,android}` を持つ
+形で提供する (= 本グローバルスキルではなく、プロジェクト側に checked-in)。
+
+例 (teachme_player):
+- `bin/push-notification-ios` … `xcrun simctl push booted` ラッパ
+- `bin/push-notification-android` … `adb shell am broadcast` ラッパ
+
+詳細は各プロジェクトの `doc/` または README を参照すること。
+
 ## Log Filtering
+
+### Silencing Android noise at the source (起動時)
+
+`flutter run` は対象アプリ PID の logcat をそのまま流すため、Android エミュレータ
+の GL が毎フレーム吐く `D/EGL_emulation … app_time_stats` が出力（= tmux ペイン）を
+埋め尽くす。`cljd-flutter` は起動時に Android デバイスが繋がっていれば、該当タグを
+デバイス側で `log.tag.<TAG>=SILENT` に設定し、**flutter が読む前に**落とす。pane に
+パイプを挟まないので `r` / `R` / `q` のホットリロード操作はそのまま使える。
+
+- デフォルトで黙らせるタグ: `EGL_emulation`
+- 変更: `CLJD_SILENCE_TAGS="EGL_emulation eglCodecCommon" cljd-flutter --tmux …`
+- 無効化: `CLJD_SILENCE_TAGS= cljd-flutter --tmux …`
+- emulator 再起動でリセットされるため、毎回の起動時に再適用される
+- iOS / adb 未接続では何もしない
+
+手動で今すぐ黙らせる場合: `adb shell setprop log.tag.EGL_emulation SILENT`
+
+### App-only (allowlist) — `--app`
+
+`cljd-build-log --app` で Dart アプリの出力行だけを残す。Android の
+`D/EGL_emulation`（フレームごとに大量）や `I/FlutterActivityAndFragmentDelegate`
+などフレームワーク/エミュレータのノイズを落とす。
+
+判定は **小文字 `flutter` + 空白**（`I/flutter ( pid):`）と iOS の `flutter:` 行。
+大文字 `F` の `I/FlutterActivity…` は対象外になる。
+
+```bash
+cljd-build-log --app --last 200
+cljd-build-log --app --errors        # アプリ出力に絞った上でエラー抽出
+```
+
+tmux ペインのライブ出力に同じフィルタをかける場合:
+
+```bash
+tmux capture-pane -t cljdf -p -S -5000 | grep -E '[A-Z]/flutter \(|^flutter:'
+```
+
+### Denylist — `.cljd-log-filter`
 
 Place a `.cljd-log-filter` file in the project root (next to `pubspec.yaml`).
 Each line is a fixed string — log lines containing it are excluded from
