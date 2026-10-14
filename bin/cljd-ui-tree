@@ -86,13 +86,19 @@ def walk(node):
     w = frame.get('width', 0)
     h = frame.get('height', 0)
 
-    if role not in SKIP and typ:
+    uid = node.get('AXUniqueId') or ''
+    # Native table cells and Flutter MergeSemantics nodes (e.g. ListTile) carry
+    # the row's label on a container role, so keep containers that have one.
+    if typ and w > 0 and h > 0 and (role not in SKIP or label or value or uid):
         parts = [f'[{typ}]']
         if label:
             parts.append(f'\"{label}\"')
         parts.append(f'(x:{int(x)} y:{int(y)} w:{int(w)} h:{int(h)})')
+        parts.append(f'center=({int(x + w / 2)},{int(y + h / 2)})')
         if value:
             parts.append(f'value=\"{value}\"')
+        if uid:
+            parts.append(f'id=\"{uid}\"')
         results.append(' '.join(parts))
 
     for child in node.get('children', []):

@@ -74,7 +74,7 @@ sys.exit(1)
   local cx cy
   cx=$(echo "$result" | cut -d' ' -f1)
   cy=$(echo "$result" | cut -d' ' -f2)
-  axe tap -x "$cx" -y "$cy" --udid "$udid" 2>&1 || return 1
+  axe tap -x "$cx" -y "$cy" --tap-style physical --udid "$udid" 2>&1 || return 1
   local matched_label
   matched_label=$(cat /tmp/_cljd_tap_label.txt 2>/dev/null)
   echo "Tapped label: $search (matched: \"$matched_label\" at $cx,$cy)"
@@ -82,7 +82,7 @@ sys.exit(1)
 
 if [[ "$1" == "--label" ]]; then
   # Try exact match first, fallback to partial match via UI tree
-  AXE_OUTPUT=$(axe tap --label "$2" --udid "$UDID" 2>&1) && {
+  AXE_OUTPUT=$(axe tap --label "$2" --tap-style physical --udid "$UDID" 2>&1) && {
     echo "Tapped label: $2"
   } || {
     _find_and_tap_by_label "$2" "$UDID" || {
@@ -93,7 +93,7 @@ if [[ "$1" == "--label" ]]; then
     }
   }
 elif [[ "$1" == "--id" ]]; then
-  AXE_OUTPUT=$(axe tap --id "$2" --udid "$UDID" 2>&1) || {
+  AXE_OUTPUT=$(axe tap --id "$2" --tap-style physical --udid "$UDID" 2>&1) || {
     echo "ERROR: Failed to tap id \"$2\"" >&2
     echo "  AXe output: $AXE_OUTPUT" >&2
     echo "  Hint: Use cljd-ui-tree --interactive to find available ids, or use cljd-tap X Y with coordinates" >&2
@@ -101,7 +101,7 @@ elif [[ "$1" == "--id" ]]; then
   }
   echo "Tapped id: $2"
 else
-  AXE_OUTPUT=$(axe tap -x "$1" -y "$2" --udid "$UDID" 2>&1) || {
+  AXE_OUTPUT=$(axe tap -x "$1" -y "$2" --tap-style physical --udid "$UDID" 2>&1) || {
     echo "ERROR: Failed to tap at ($1, $2)" >&2
     [[ -n "$AXE_OUTPUT" ]] && echo "  AXe output: $AXE_OUTPUT" >&2
     exit 1

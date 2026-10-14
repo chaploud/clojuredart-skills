@@ -26,7 +26,7 @@ Recommended:
 Optional:
 - **[AXe](https://github.com/cameroncooke/axe)** for UI interaction (tap, swipe, type, accessibility tree)
   ```bash
-  brew tap cameroncooke/axe && brew install axe
+  brew tap cameroncooke/axe && brew install axe   # 1.7+ (1.8+ for Xcode 27)
   ```
 
 All other dependencies (`xcrun simctl`, `sips`, `python3`) are included with macOS.
@@ -84,8 +84,9 @@ export PATH="$HOME/.local/bin:$PATH"
 ## Quick Start
 
 ```bash
-# 1. Start a simulator
-open -a Simulator
+# 1. Start a simulator (wait for boot to finish; AXe commands time out right after boot)
+xcrun simctl boot "iPhone 17 Pro" && xcrun simctl bootstatus "iPhone 17 Pro" -b
+open -b com.apple.dt.Devices   # Xcode 27+ (Device Hub). Xcode 26 and earlier: open -a Simulator
 
 # 2. Start the build in a detached tmux session (recommended)
 cljd-flutter --tmux --flavor dev

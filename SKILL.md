@@ -201,11 +201,12 @@ cljd-ui-tree --interactive         # Buttons and text fields only
 
 `--compact` output format:
 ```
-[Button] "Login" (x:100 y:200 w:80 h:40)
-[TextField] "Email" (x:50 y:300 w:200 h:44) value=""
+[Button] "Login" (x:100 y:200 w:80 h:40) center=(140,220)
+[TextField] "Email" (x:50 y:300 w:200 h:44) center=(150,322) value="foo" id="email"
 ```
 
-Use the x,y coordinates with `cljd-tap` to interact with elements.
+`x,y` is the top-left corner; pass `center` to `cljd-tap X Y`, or `id` to `cljd-tap --id`.
+Zero-size (off-screen) elements are omitted.
 
 ### Tap (`cljd-tap`) — requires AXe
 
