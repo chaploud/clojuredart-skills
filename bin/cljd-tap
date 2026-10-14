@@ -25,7 +25,7 @@ if ! command -v axe &>/dev/null; then
   exit 1
 fi
 
-UDID=$(xcrun simctl list devices booted --json | python3 -c "
+UDID=${CLJD_UDID:-$(xcrun simctl list devices booted --json | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 for runtime, devices in data.get('devices', {}).items():
@@ -34,7 +34,7 @@ for runtime, devices in data.get('devices', {}).items():
             print(d['udid'])
             sys.exit(0)
 sys.exit(1)
-" 2>/dev/null) || {
+" 2>/dev/null)} || {
   echo "ERROR: No booted iOS Simulator found." >&2
   exit 1
 }
@@ -89,6 +89,7 @@ if [[ "$1" == "--label" ]]; then
       echo "ERROR: Failed to tap label \"$2\"" >&2
       echo "  AXe output: $AXE_OUTPUT" >&2
       echo "  Hint: Use cljd-ui-tree --compact to find available labels, or use cljd-tap X Y with coordinates" >&2
+      echo "  Content inside a WebView (platform view) never appears in describe-ui; tap it by coordinates" >&2
       exit 1
     }
   }

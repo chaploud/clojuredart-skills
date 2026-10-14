@@ -189,6 +189,9 @@ cljd-devices --booted              # Booted only
 cljd-devices --json                # JSON output
 ```
 
+The AXe tools (`cljd-ui-tree` / `cljd-tap` / `cljd-swipe` / `cljd-type` / `cljd-key`) act on the first booted
+simulator. With several booted, pin one with `export CLJD_UDID=<UDID>`.
+
 ### UI Tree (`cljd-ui-tree`) — requires AXe
 
 Get the accessibility tree to find element coordinates for tapping.
